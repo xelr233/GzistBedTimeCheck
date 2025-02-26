@@ -1,5 +1,4 @@
-
-#!/usr/bin/python3
+# !/usr/bin/python3
 # coding=utf-8
 """
 Author: Xe
@@ -8,14 +7,16 @@ cron: 1 22 * * *
 new Env('查寝);
 """
 
+from time import sleep
+
+import execjs
 import feapder
 import feapder.setting
 from feapder.utils.tools import log
-import getenv
+
 import OCR
-import execjs
-from time import sleep
-import requests
+import getenv
+
 DEBUG = False
 with open('v1.js', 'r', encoding='utf-8') as f:
     js = f.read()
@@ -23,10 +24,13 @@ ctx = execjs.compile(js)
 feapder.setting.USE_SESSION = False
 feapder.setting.REQUEST_TIMEOUT = 3
 feapder.setting.SPIDER_MAX_RETRY_TIMES = 2
-if DEBUG:
-    feapder.setting.LOG_LEVEL = "DEBUG"
-else:
-    feapder.setting.LOG_LEVEL = "INFO"
+feapder.setting.LOG_LEVEL = "DEBUG" if DEBUG else "INFO"
+# 增加错误处理机制，防止在设置日志级别时出现异常
+try:
+    feapder.setting.LOG_LEVEL = "DEBUG" if DEBUG else "INFO"
+except Exception as e:
+    log.error(f"设置日志级别失败：{e}")
+    feapder.setting.LOG_LEVEL = "INFO"  # 默认设置为INFO级别，确保程序继续运行
 feapder.setting.RANDOM_HEADERS = True
 feapder.setting.SPIDER_THREAD_COUNT = 1
 feapder.setting.SPIDER_SLEEP_TIME = 1
@@ -72,7 +76,7 @@ class Config:
     }
     user_cookie = {
     }
-    bedecheck_data = {
+    bedtime_check_data = {
         "data": "{\"APPID\":\"5405362541914944\",\"APPNAME\":\"swmzncqapp\"}"
     }
     post_data = {
@@ -108,7 +112,7 @@ class Account:
         return False
 
 
-class AccouintManager:
+class AccountManager:
     def __init__(self):
         self.get_account_list()
         log.info(f"账号数量：{len(self.account_list)}")
@@ -130,20 +134,19 @@ class AccouintManager:
             log.error(f"获取账号密码失败：{e}")
 
     def get_current_account(self) -> Account:
-        if self.current_account_index == -1:
-            return None
         return self.account_list[self.current_account_index]
 
     def get_account_quantity(self) -> int:
         return len(self.account_list)
 
     def next_account(self) -> bool:
+        if self.current_account_index == -1:
+            return False
         if self.current_account_index < self.get_account_quantity() - 1:
             self.current_account_index += 1
             return True
-        else:
-            self.current_account_index = -1
-            return False
+        self.current_account_index = -1
+        return False
 
     def log_account_info(self, index) -> None:
         account: Account = self.account_list[index]
@@ -153,7 +156,7 @@ class AccouintManager:
 class BedtimeCheck(feapder.AirSpider):
     def __init__(self):
         super().__init__()
-        self.account_manager = AccouintManager()
+        self.account_manager = AccountManager()
 
     def continues_request(self, account: Account, request: feapder.Request, back=False) -> feapder.Request:
         sleep(10)
@@ -199,11 +202,11 @@ class BedtimeCheck(feapder.AirSpider):
     def parse_cap(self, request: feapder.Request, response: feapder.Response):  # type: ignore
         data = response.json
         uid = data.get("uid")
+        account: Account = self.account_manager.get_current_account()
         if not uid or not uid:
             log.error(f"获取验证码失败")
             yield self.continues_request(account, request)
         base64_code = data.get("content").replace("data:image/png;base64,", "")
-        account: Account = self.account_manager.get_current_account()
         log.debug(f"account: {account} , uid={uid}")
         code = OCR.ocr(base64_code)
         log.info(f"account: {account} 验证码为：{code}")
@@ -256,17 +259,17 @@ class BedtimeCheck(feapder.AirSpider):
                               callback=self.update_cookie,
                               headers=Config.headers,
                               cookies=account.cookie,
-                              data=Config.bedecheck_data,
+                              data=Config.bedtime_check_data,
                               )
 
     def update_cookie(self, request: feapder.Request, response: feapder.Response):
-        cookie = response.cookies.get_dict()
+        cookies = response.cookies.get_dict()
         account = self.account_manager.get_current_account()
-        if not cookie:
+        if not cookies:
             log.error(f"account: {account} 更新cookie失败")
             yield self.continues_request(account, request)
-        log.debug(f"account: {account} , cookie={cookie}")
-        account.cookie.update(cookie)
+        log.debug(f"account: {account} , cookie={cookies}")
+        account.cookie.update(cookies)
         yield feapder.Request(Config.check_url,
                               method='POST',
                               callback=self.check,
@@ -296,7 +299,6 @@ class BedtimeCheck(feapder.AirSpider):
             yield feapder.Request(Config.get_sid_url,
                                   callback=self.parse,
                                   )
-
         return
 
 
