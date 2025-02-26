@@ -188,6 +188,7 @@ class BedtimeCheck(feapder.AirSpider):
         if not sid:
             log.error(f"获取sid失败：{response.text}")
             yield self.continues_request(account, request)
+            return
         account.defalut_cookie['sid'] = sid
         log.debug(f"account: {account} , sid = {sid}")
         yield feapder.Request(Config.get_cap_url,
@@ -202,16 +203,20 @@ class BedtimeCheck(feapder.AirSpider):
         if not uid or not uid:
             log.error(f"获取验证码失败")
             yield self.continues_request(account, request,back=True)
+            return
         base64_code = data.get("content").replace("data:image/png;base64,", "")
         log.debug(f"account: {account} , uid={uid}")
         code = OCR.ocr(base64_code)
         log.info(f"account: {account} 验证码为：{code}")
         code = code.replace("=", "")
+        if 'o' in code:
+            code = code.replace('o', '0')
         try:
             code = eval(code)
         except Exception as e:
             log.error(f"account: {account} 验证码转换失败：{e}")
             yield self.continues_request(account, request,back=True)
+            return
         account.data['id'] = uid
         account.data['code'] = code
         yield feapder.Request(Config.login_url,
@@ -228,7 +233,7 @@ class BedtimeCheck(feapder.AirSpider):
         if "ticket" not in ticket:
             log.error(f"account: {account} 登录失败,{response.text}")
             yield self.continues_request(account, request, back=True)
-
+            return
         log.debug(f"account:{account} response.text = {response.text}")
 
         params = {
@@ -248,6 +253,7 @@ class BedtimeCheck(feapder.AirSpider):
         if not cookies:
             log.error(f"account: {account} 获取cookie失败")
             yield self.continues_request(account, request)
+            return
         log.debug(f"account: {account} , cookies={cookies}")
         account.cookie.update(cookies)
         yield feapder.Request(Config.update_cookie_url,
@@ -264,6 +270,7 @@ class BedtimeCheck(feapder.AirSpider):
         if not cookies:
             log.error(f"account: {account} 更新cookie失败")
             yield self.continues_request(account, request)
+            return
         log.debug(f"account: {account} , cookie={cookies}")
         account.cookie.update(cookies)
         yield feapder.Request(Config.check_url,
