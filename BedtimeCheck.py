@@ -185,10 +185,6 @@ class BedtimeCheck(feapder.AirSpider):
     def parse(self, request: feapder.Request, response: feapder.Response):  # type: ignore
         sid = response.cookies.get_dict().get('sid')
         account: Account = self.account_manager.get_current_account()
-        if not account:
-            log.info("账号全部登录完毕")
-
-            exit(0)
         if not sid:
             log.error(f"获取sid失败：{response.text}")
             yield self.continues_request(account, request)
@@ -205,7 +201,7 @@ class BedtimeCheck(feapder.AirSpider):
         account: Account = self.account_manager.get_current_account()
         if not uid or not uid:
             log.error(f"获取验证码失败")
-            yield self.continues_request(account, request)
+            yield self.continues_request(account, request,back=True)
         base64_code = data.get("content").replace("data:image/png;base64,", "")
         log.debug(f"account: {account} , uid={uid}")
         code = OCR.ocr(base64_code)
@@ -215,7 +211,7 @@ class BedtimeCheck(feapder.AirSpider):
             code = eval(code)
         except Exception as e:
             log.error(f"account: {account} 验证码转换失败：{e}")
-            yield self.continues_request(account, request)
+            yield self.continues_request(account, request,back=True)
         account.data['id'] = uid
         account.data['code'] = code
         yield feapder.Request(Config.login_url,
