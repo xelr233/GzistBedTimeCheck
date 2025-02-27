@@ -85,7 +85,7 @@ class Config:
 
 
 class Account:
-    MAX_RETRY_TIMES = 3
+    MAX_RETRY_TIMES = 1
 
     def __init__(self, student_id, password):
         self.student_id = student_id
@@ -97,6 +97,7 @@ class Account:
         self.defalut_cookie = Config.defult_cooike.copy()
         self.retry_times = 0
         self.check_success = False
+        self.login_status = "success"
 
     def __str__(self) -> str:
         return f"student_id:{self.student_id}"
@@ -115,6 +116,7 @@ class Account:
 class AccountManager:
     def __init__(self):
         self.get_account_list()
+        self.failed_account_set = set()
         log.info(f"账号数量：{len(self.account_list)}")
         if self.get_account_quantity() > 0:
             self.current_account_index = 0
@@ -152,11 +154,14 @@ class AccountManager:
         account: Account = self.account_list[index]
         log.info(f"当前账号：{index},账号:{account.student_id},密码:{account.password}")
 
+    def add_failed_account(self, account: Account) -> None:
+        self.failed_account_set.add(account)
 
 class BedtimeCheck(feapder.AirSpider):
+    account_manager = AccountManager()
     def __init__(self):
         super().__init__()
-        self.account_manager = AccountManager()
+        
 
     def continues_request(self, account: Account, request: feapder.Request, back=False) -> feapder.Request:
         sleep(10)
@@ -168,6 +173,7 @@ class BedtimeCheck(feapder.AirSpider):
             return request
         else:
             log.error(f"account: {account} 登录失败,重试次数达到上限")
+            self.account_manager.add_failed_account(account)
             log.info(f"开始切换账号")
             sleep(10)
             if self.account_manager.next_account():
@@ -195,6 +201,17 @@ class BedtimeCheck(feapder.AirSpider):
                               callback=self.parse_cap,
                               cookies=account.defalut_cookie
                               )
+    # OCR错误码替换表
+    replace_map = {
+        'o': '0',
+        'O': '0',
+        'I': '1',
+        '三': '',
+        '二': ''
+    }
+
+    def fix_ocr(self, ocr_result):
+        return ''.join(self.replace_map.get(c, c) for c in ocr_result)
 
     def parse_cap(self, request: feapder.Request, response: feapder.Response):  # type: ignore
         data = response.json
@@ -202,20 +219,20 @@ class BedtimeCheck(feapder.AirSpider):
         account: Account = self.account_manager.get_current_account()
         if not uid or not uid:
             log.error(f"获取验证码失败")
-            yield self.continues_request(account, request,back=True)
+            yield self.continues_request(account, request, back=True)
             return
         base64_code = data.get("content").replace("data:image/png;base64,", "")
         log.debug(f"account: {account} , uid={uid}")
         code = OCR.ocr(base64_code)
-        log.info(f"account: {account} 验证码为：{code}")
+
         code = code.replace("=", "")
-        if 'o' in code:
-            code = code.replace('o', '0')
+        code = self.fix_ocr(code)
+        log.info(f"account: {account} 验证码为：{code}")
         try:
             code = eval(code)
         except Exception as e:
             log.error(f"account: {account} 验证码转换失败：{e}")
-            yield self.continues_request(account, request,back=True)
+            yield self.continues_request(account, request, back=True)
             return
         account.data['id'] = uid
         account.data['code'] = code
@@ -227,17 +244,35 @@ class BedtimeCheck(feapder.AirSpider):
                               cookies=account.defalut_cookie,
                               )
 
+    # 常见登录失败原因对照表
+    login_failed_reason_map = {
+        "PASSERROR": "密码错误",
+        "NOUSER": "学号错误",
+        "USERLOCK": "账号被锁定"
+        # "CODEFALSE": "验证码错误"
+    }
+
     def login(self, request: feapder.Request, response: feapder.Response):
-        ticket = response.json
+        body = response.json
         account = self.account_manager.get_current_account()
-        if "ticket" not in ticket:
-            log.error(f"account: {account} 登录失败,{response.text}")
+        if "ticket" not in body:
+            # log.error(f"account: {account} 登录失败,{response.text}")
+            # 失败原因
+            login_failed_reason = body.get("data", {}).get("msg", None)
+            if login_failed_reason in self.login_failed_reason_map:
+                log.error(
+                    f"account: {account} 登录失败,{self.login_failed_reason_map[login_failed_reason]}")
+                # 已知错误不再重试
+                account.login_status = login_failed_reason
+                account.retry_times = account.MAX_RETRY_TIMES
+            else:
+                log.error(f"account: {account} 登录失败,{response.text}")
             yield self.continues_request(account, request, back=True)
             return
         log.debug(f"account:{account} response.text = {response.text}")
 
         params = {
-            "ticket": ticket.get("ticket"),
+            "ticket": body.get("ticket"),
         }
         log.debug(f"account: {account} , params = {params}")
         yield feapder.Request(Config.get_cookie_url,
@@ -298,13 +333,19 @@ class BedtimeCheck(feapder.AirSpider):
 
         if self.account_manager.next_account():
             log.info(f"开始切换账号")
-            sleep(10)
+            sleep(2)
             yield feapder.Request(Config.get_sid_url,
                                   callback=self.parse,
                                   )
         return
 
+class AfterCheck:
+    def logging_failed_account():
+        log.info("以下账号登录失败：")
+        for account in BedtimeCheck.account_manager.failed_account_set:
+            log.info(f"账号：{account},失败原因{account.login_status}")
 
 if __name__ == "__main__":
     log.info("程序开始运行")
     BedtimeCheck().start()
+    AfterCheck.logging_failed_account()
