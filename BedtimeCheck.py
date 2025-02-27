@@ -8,6 +8,7 @@ new Env('查寝);
 """
 
 from time import sleep
+from notify import send
 
 import execjs
 import feapder
@@ -35,6 +36,8 @@ feapder.setting.RANDOM_HEADERS = True
 feapder.setting.SPIDER_THREAD_COUNT = 1
 feapder.setting.SPIDER_SLEEP_TIME = 1
 
+TITLE= "查寝通知"
+msg_List = []
 
 class Config:
     headers = {
@@ -324,16 +327,19 @@ class BedtimeCheck(feapder.AirSpider):
             if code == '0':
                 account.check_success = True
                 log.info(f"account: {account} 查寝成功")
+                msg_List.append(f"✅ 账号：{account} 查寝成功\n")
             else:
                 msg = data.get("msg")
                 log.error(f"account: {account} 查寝失败：{msg}")
+                msg_List.append(f"⚠️ 账号：{account} 查寝失败：{msg}\n")
         except Exception as e:
             log.error(e)
             log.debug(f"account: {account} 查寝失败：{response.text}")
+            msg_List.append(f"⚠️ 账号：{account} 查寝失败：{response.text}\n")
 
         if self.account_manager.next_account():
             log.info(f"开始切换账号")
-            sleep(2)
+            sleep(1)
             yield feapder.Request(Config.get_sid_url,
                                   callback=self.parse,
                                   )
@@ -341,6 +347,7 @@ class BedtimeCheck(feapder.AirSpider):
 
     def end_callback(self):
         AfterCheck.logging_failed_account()
+        AfterCheck.send_notify()
 
 class AfterCheck:
     @classmethod
@@ -348,6 +355,12 @@ class AfterCheck:
         log.info("以下账号登录失败：")
         for account in BedtimeCheck.account_manager.failed_account_set:
             log.info(f"账号：{account},失败原因{account.login_status}")
+            msg_List.append(f"❌ 账号：{account},失败原因{account.login_status}\n")
+    @classmethod
+    def send_notify(cls):
+        log.info("发送通知")
+        msg = ''.join(filter(None, msg_List))  # 过滤掉None和空字符串
+        send(TITLE, msg)
 
 if __name__ == "__main__":
     log.info("程序开始运行")
