@@ -9,7 +9,7 @@ new Env('查寝);
 
 from time import sleep
 from notify import send
-
+from WxPusher import WxPusher
 import execjs
 import feapder
 import feapder.setting
@@ -266,7 +266,7 @@ class BedtimeCheck(feapder.AirSpider):
                 log.error(
                     f"account: {account} 登录失败,{self.login_failed_reason_map[login_failed_reason]}")
                 # 已知错误不再重试
-                account.login_status = login_failed_reason
+                account.login_status = self.login_failed_reason_map[login_failed_reason]
                 account.retry_times = account.MAX_RETRY_TIMES
             else:
                 log.error(f"account: {account} 登录失败,{response.text}")
@@ -361,6 +361,12 @@ class AfterCheck:
         log.info("发送通知")
         msg = ''.join(filter(None, msg_List))  # 过滤掉None和空字符串
         send(TITLE, msg)
+        log.info("开始推送微信通知")
+        pusher = WxPusher()
+        if pusher.send_message(TITLE, msg):
+            log.info("微信通知发送成功")
+        else:
+            log.error("微信通知发送失败")
 
 if __name__ == "__main__":
     log.info("程序开始运行")
