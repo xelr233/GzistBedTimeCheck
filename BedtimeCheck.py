@@ -106,7 +106,7 @@ class Account:
         return self.__str__()
 
     def need_continue(self) -> bool:
-        print(self.retry_times)
+        log.info(f"account: {self} 重试次数：{self.retry_times}")
         if self.retry_times < Account.MAX_RETRY_TIMES:
             self.retry_times += 1
             return True
@@ -175,7 +175,7 @@ class BedtimeCheck(feapder.AirSpider):
             log.error(f"account: {account} 登录失败,重试次数达到上限")
             self.account_manager.add_failed_account(account)
             log.info(f"开始切换账号")
-            sleep(10)
+            sleep(2)
             if self.account_manager.next_account():
                 return feapder.Request(Config.get_sid_url,
                                        callback=self.parse,
@@ -258,7 +258,7 @@ class BedtimeCheck(feapder.AirSpider):
         if "ticket" not in body:
             # log.error(f"account: {account} 登录失败,{response.text}")
             # 失败原因
-            login_failed_reason = body.get("data", {}).get("msg", None)
+            login_failed_reason = body.get("data", {}).get("code", None)
             if login_failed_reason in self.login_failed_reason_map:
                 log.error(
                     f"account: {account} 登录失败,{self.login_failed_reason_map[login_failed_reason]}")
@@ -339,8 +339,12 @@ class BedtimeCheck(feapder.AirSpider):
                                   )
         return
 
+    def end_callback(self):
+        AfterCheck.logging_failed_account()
+
 class AfterCheck:
-    def logging_failed_account():
+    @classmethod
+    def logging_failed_account(cls):
         log.info("以下账号登录失败：")
         for account in BedtimeCheck.account_manager.failed_account_set:
             log.info(f"账号：{account},失败原因{account.login_status}")
@@ -348,4 +352,3 @@ class AfterCheck:
 if __name__ == "__main__":
     log.info("程序开始运行")
     BedtimeCheck().start()
-    AfterCheck.logging_failed_account()
